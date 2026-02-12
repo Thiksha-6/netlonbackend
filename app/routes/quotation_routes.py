@@ -84,7 +84,8 @@ def get_quotations():
             },
             "stats": {
                 "total_value": float(total_value),
-                "this_month": this_month_count
+                "this_month": this_month_count,
+                "growth_percentage": 0
             }
         }), 200
 
@@ -100,7 +101,6 @@ def get_quotation(id):
 
 
 # ================= CREATE QUOTATION =================
-# ================= CREATE QUOTATION =================
 @quotations_bp.route('/quotations', methods=['POST'])
 def create_quotation():
     try:
@@ -112,11 +112,12 @@ def create_quotation():
         customer = data.get("customerInfo", {})
         totals = data.get("totals", {})
 
-        # Handle estimate date conversion
         estimate_date = None
         if customer.get("estimateDate"):
             try:
-                estimate_date = datetime.strptime(customer.get("estimateDate"), '%Y-%m-%d').date()
+                estimate_date = datetime.strptime(
+                    customer.get("estimateDate"), '%Y-%m-%d'
+                ).date()
             except ValueError:
                 estimate_date = None
 
@@ -126,13 +127,15 @@ def create_quotation():
             bill_to=customer.get("billTo"),
             contact_no=customer.get("contactNo"),
             state_name=customer.get("stateName"),
-            customer_gstin=customer.get("gstin"),
+            # FIXED: Changed from 'gstin' to 'customerGstin'
+            customer_gstin=customer.get("customerGstin"),
             estimate_no=customer.get("estimateNo"),
-            estimate_date=estimate_date,  # Save estimate date
+            estimate_date=estimate_date,
             company_name=DEFAULT_COMPANY_INFO["name"],
-            company_address=DEFAULT_COMPANY_INFO["address"],
+            company_description=DEFAULT_COMPANY_INFO["description"],
             company_phone=DEFAULT_COMPANY_INFO["phone"],
             company_gstin=DEFAULT_COMPANY_INFO["gstin"],
+            company_address=DEFAULT_COMPANY_INFO["address"],
             company_branch=DEFAULT_COMPANY_INFO["branch"],
             total_amount=totals.get("totalAmount", 0),
             cgst=totals.get("cgst", 0),
@@ -154,7 +157,7 @@ def create_quotation():
             ))
 
         db.session.commit()
-        return jsonify({"message": "Quotation created"}), 201
+        return jsonify({"message": "Quotation created successfully", "id": quotation.id}), 201
 
     except IntegrityError:
         db.session.rollback()
@@ -162,6 +165,7 @@ def create_quotation():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
 
 # ================= UPDATE QUOTATION =================
 @quotations_bp.route('/quotations/<int:id>', methods=['PUT'])
@@ -177,29 +181,32 @@ def update_quotation(id):
         customer = data.get("customerInfo", {})
         totals = data.get("totals", {})
 
-        # Handle estimate date conversion
         estimate_date = None
         if customer.get("estimateDate"):
             try:
-                estimate_date = datetime.strptime(customer.get("estimateDate"), '%Y-%m-%d').date()
+                estimate_date = datetime.strptime(
+                    customer.get("estimateDate"), '%Y-%m-%d'
+                ).date()
             except ValueError:
                 estimate_date = None
 
-        # Update quotation fields
         quotation.bill_to = customer.get("billTo")
         quotation.contact_no = customer.get("contactNo")
         quotation.state_name = customer.get("stateName")
-        quotation.customer_gstin = customer.get("gstin")
+        # FIXED: Changed from 'gstin' to 'customerGstin'
+        quotation.customer_gstin = customer.get("customerGstin")
         quotation.estimate_no = customer.get("estimateNo")
-        quotation.estimate_date = estimate_date  # Update estimate date
+        quotation.estimate_date = estimate_date
         quotation.total_amount = totals.get("totalAmount", 0)
         quotation.cgst = totals.get("cgst", 0)
         quotation.sgst = totals.get("sgst", 0)
         quotation.grand_total = totals.get("grandTotal", 0)
         quotation.updated_at = datetime.utcnow()
 
-        # Delete old items
-        QuotationItem.query.filter_by(quotation_id=quotation.id).delete()
+        # Delete existing items
+        QuotationItem.query.filter_by(
+            quotation_id=quotation.id
+        ).delete()
 
         # Add new items
         for i, item in enumerate(data.get("items", [])):
@@ -219,21 +226,31 @@ def update_quotation(id):
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# ================= COMPANY INFO =================
-@quotations_bp.route('/company/info', methods=['GET'])
-def get_company_info():
-    return jsonify(DEFAULT_COMPANY_INFO), 200
 
-
-# ================= HEALTH =================
-@quotations_bp.route('/health', methods=['GET'])
-def health():
+# ================= DELETE QUOTATION =================
+@quotations_bp.route('/quotations/<int:id>', methods=['DELETE'])
+def delete_quotation(id):
     try:
-        db.session.execute("SELECT 1")
-        return jsonify({"status": "OK"}), 200
+        quotation = Quotation.query.get_or_404(id)
+
+        # Delete related items first (cascade should handle this, but explicit for safety)
+        QuotationItem.query.filter_by(
+            quotation_id=quotation.id
+        ).delete()
+
+        db.session.delete(quotation)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Quotation deleted successfully"
+        }), 200
+
     except Exception as e:
-        return jsonify({"status": "DB ERROR", "error": str(e)}), 500
-# ================= GET QUOTATION BY QUOTATION NUMBER =================
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ================= GET BY QUOTATION NUMBER =================
 @quotations_bp.route('/quotations/number/<string:quotation_no>', methods=['GET'])
 def get_quotation_by_number(quotation_no):
     try:
@@ -251,3 +268,19 @@ def get_quotation_by_number(quotation_no):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ================= COMPANY INFO =================
+@quotations_bp.route('/company/info', methods=['GET'])
+def get_company_info():
+    return jsonify(DEFAULT_COMPANY_INFO), 200
+
+
+# ================= HEALTH =================
+@quotations_bp.route('/health', methods=['GET'])
+def health():
+    try:
+        db.session.execute("SELECT 1")
+        return jsonify({"status": "OK", "message": "Quotations service is healthy"}), 200
+    except Exception as e:
+        return jsonify({"status": "DB ERROR", "error": str(e)}), 500

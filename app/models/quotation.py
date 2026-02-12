@@ -1,5 +1,5 @@
 from datetime import datetime
-from app import db   # ✅ IMPORTANT FIX
+from app import db
 
 
 class Quotation(db.Model):
@@ -57,7 +57,8 @@ class Quotation(db.Model):
                 "billTo": self.bill_to,
                 "stateName": self.state_name,
                 "contactNo": self.contact_no,
-                "gstin": self.customer_gstin,
+                # FIXED: Changed from "gstin" to "customerGstin" to match frontend
+                "customerGstin": self.customer_gstin,
                 "estimateNo": self.estimate_no,
                 "estimateDate": self.estimate_date.isoformat()
                 if self.estimate_date
@@ -73,7 +74,7 @@ class Quotation(db.Model):
                 "branch": self.company_branch,
             },
 
-            "items": [item.to_dict() for item in self.items],
+            "items": [item.to_dict() for item in sorted(self.items, key=lambda x: x.item_order)],
 
             "totals": {
                 "totalAmount": self.total_amount,
